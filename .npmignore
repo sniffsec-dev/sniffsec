@@ -1,0 +1,7 @@
+app/
+test-env.js
+.env.example
+node_modules/
+.git/
+.next/
+*.log

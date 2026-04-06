@@ -1,0 +1,34 @@
+{
+  "name": "sniffsec",
+  "version": "0.1.1",
+  "description": "Invisible safety net for AI-driven development. Sniffs out build-breakers and secret leaks in Next.js apps.",
+  "main": "sniffsec.js",
+  "bin": {
+    "sniffsec": "sniffsec.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "test": "node sniffsec.js"
+  },
+  "keywords": [
+    "security",
+    "nextjs",
+    "vercel",
+    "static-analysis",
+    "cli",
+    "PII",
+    "DPDPA"
+  ],
+  "author": "SniffSec Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sniffsec/sniffsec.git"
+  },
+  "bugs": {
+    "url": "https://github.com/sniffsec/sniffsec/issues"
+  },
+  "homepage": "https://sniffsec.com"
+}
