@@ -1,7 +1,7 @@
 {
   "name": "sniffsec",
   "version": "0.1.1",
-  "description": "Invisible safety net for AI-driven development. Sniffs out build-breakers and secret leaks in Next.js apps.",
+  "description": "The invisible watchdog for your builds. Sniffs out secret leaks (Stripe/AWS), PII exposure, and build-breaking bugs in JS/TS apps. Zero-config, local-only.",
   "main": "sniffsec.js",
   "bin": {
     "sniffsec": "sniffsec.js"
