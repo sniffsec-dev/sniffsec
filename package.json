@@ -1,6 +1,6 @@
 {
   "name": "sniffsec",
-  "version": "0.1.2",
+  "version": "0.1.4",
   "description": "The invisible watchdog for your builds. Sniffs out secret leaks (Stripe/AWS), PII exposure, and build-breaking bugs in JS/TS apps. Zero-config, local-only.",
   "main": "sniffsec.js",
   "bin": {
@@ -25,10 +25,6 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/sniffsec/sniffsec.git"
-  },
-  "bugs": {
-    "url": "https://github.com/sniffsec/sniffsec/issues"
-  },
-  "homepage": "https://sniffsec.com"
+    "url": "git+https://github.com/sniffsec-dev/sniffsec.git"
+  }
 }
