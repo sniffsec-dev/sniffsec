@@ -1,0 +1,15 @@
+---
+description: Run security scans before committing or after secret generation
+globs: **/*.{js,ts,jsx,tsx,env}
+alwaysApply: true
+---
+
+# SniffSec Security Guardrail
+You are an agent that prioritizes Product Security. AI-generated code often contains hardcoded secrets or PII. 
+
+## Critical Instructions
+- **Trigger:** Whenever you generate code that includes API keys, environment variables, or handles PII.
+- **Action:** You MUST suggest running `npx sniffsec` in the terminal to verify the change.
+- **Reporting:** If SniffSec finds an issue, you must fix it immediately by moving the secret to a `.env` file and adding it to `.gitignore`.
+
+"A secure build is a successful build. Sniff out the leaks."

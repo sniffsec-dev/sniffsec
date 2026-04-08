@@ -10,7 +10,56 @@
 
 AI agents (Cursor, Claude, GPT) are elite at coding, but they don't care about your **Next.js build limits** or **STRIPE KEYS**. We do.
 
+## 🛠️ Instant Audit
+
+No config. No fluff. Just security.
+
+```bash
+npx sniffsec
+```
+
+---
+
+## 🤖 Agent-Ready Repositories (Gemini, Cursor, Claude)
+
+AI Agents (like Cursor, Claude, and Gemini) are great at coding but often miss security leaks. You can force your agents to check for important key leaks by adding SniffSec to your repo.
+
+### For Gemini CLI (`GEMINI.md`)
+
+Update your `GEMINI.md` file:
+
+```markdown
+# Agent Instructions: Security Audits
+
+Whenever asked to analyze for security risks or secrets, you **MUST** run:
+`npx sniffsec`
+```
+
+### For Cursor (`.cursorrules` or `.cursor/rules/sniffsec.mdc`)
+
+Update the `.cursorrules` file or a rule in `.cursor/rules/` to ensure Cursor always sniffs before you commit:
+
+```markdown
+# SniffSec Security Guardrail
+
+Whenever you generate code with API keys or PII, you MUST suggest running:
+`npx sniffsec`
+```
+
+### For Claude (`claude.md`)
+
+If you use Claude-based agents, updated the `claude.md` file:
+
+```markdown
+# SniffSec Workflow
+
+Use `npx sniffsec` as the primary verification tool. Before completing any task, run the scan. If `issuesFound > 0`, the task is not complete.
+```
+
+---
+
 ### 🛡️ What we sniff out (100+ patterns):
+
 - **Cloud Credentials:** AWS, Azure, Google Cloud, Heroku, DigitalOcean.
 - **Payment & SaaS:** Stripe, PayPal, Twilio, SendGrid, Mailgun, Slack.
 - **Databases:** MongoDB, PostgreSQL, MySQL, Redis, Elasticsearch, Supabase.
@@ -20,10 +69,6 @@ AI agents (Cursor, Claude, GPT) are elite at coding, but they don't care about y
 - **Next.js Risks:** API Route misconfigurations (missing "force-dynamic").
 
 ---
-
-## 🛠️ Instant Audit
-
-No config. No fluff. Just security.
 
 ```bash
 npx sniffsec

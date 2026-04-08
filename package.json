@@ -10,7 +10,8 @@
     "node": ">=18.0.0"
   },
   "scripts": {
-    "test": "node sniffsec.js"
+    "test": "node sniffsec.js",
+    "security:sniff": "node sniffsec.js"
   },
   "keywords": [
     "security",
