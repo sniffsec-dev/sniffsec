@@ -1,6 +1,6 @@
 {
   "name": "sniffsec",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "The invisible watchdog for your builds. Sniffs out secret leaks (Stripe/AWS), PII exposure, and build-breaking bugs in JS/TS apps. Zero-config, local-only.",
   "main": "sniffsec.js",
   "bin": {
