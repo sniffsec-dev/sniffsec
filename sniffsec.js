@@ -36,6 +36,18 @@ function isPlaceholder(val) {
   return PLACEHOLDERS.some(p => lower.includes(p)) || /^[x*<>]{4,}$/.test(lower);
 }
 
+// Strip JS/TS block and line comments to avoid matching patterns inside comments
+function stripComments(content) {
+  return content
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/\/\/.*/g, '');
+}
+
+// Return the 1-based line number for a given character offset in content
+function lineAt(content, index) {
+  return content.slice(0, index).split('\n').length;
+}
+
 const SECURITY_PATTERNS = {
   // --- Credentials with strong, unique prefixes (low false-positive risk) ---
   "OpenAI API Key":         /\bsk-[a-zA-Z0-9T]{20}[a-zA-Z0-9]{12,}/g,
@@ -87,6 +99,11 @@ const SECURITY_PATTERNS = {
   "Generic_Secret":        /(?:password|secret|token|apiKey|api_key)\s*[:=]\s*['"]([^'"]{8,})['"]/gi,
 };
 
+// Patterns that use capture groups — placeholder check runs on the captured value only
+const CAPTURE_GROUP_PATTERNS = new Set([
+  'Password Assignment', 'API Key Assignment', 'Secret Assignment', 'Generic_Secret'
+]);
+
 /**
  * SniffSec CLI v0.1
  * Static Analysis Tool for Vibe Coders
@@ -97,10 +114,11 @@ class SniffSec {
     this.stats = { critical: 0 };
   }
 
-  log(level, rule, message, file) {
+  log(level, rule, message, file, lineNumber) {
     const filePath = path.relative(this.cwd, file);
-    console.log(`${level} ${BOLD}${rule}${RESET}: ${message} ${BLUE}(${filePath})${RESET}`);
-    this.stats.critical++;
+    const loc = lineNumber ? `:${lineNumber}` : '';
+    console.log(`${level} ${BOLD}${rule}${RESET}: ${message} ${BLUE}(${filePath}${loc})${RESET}`);
+    if (level === LOG_LEVELS.CRITICAL) this.stats.critical++;
   }
 
   walk(dir, callback) {
@@ -121,7 +139,6 @@ class SniffSec {
       const fullPath = path.join(dir, file);
       try {
         const stat = fs.statSync(fullPath);
-        // Skip hidden directories
         if (file.startsWith('.') && stat.isDirectory()) continue;
 
         if (stat.isDirectory()) {
@@ -143,31 +160,42 @@ class SniffSec {
       if (!['.js', '.ts', '.jsx', '.tsx'].includes(ext)) return;
       if (filePath === __filename) return;
 
-      const content = fs.readFileSync(filePath, 'utf8');
+      let content;
+      try {
+        content = fs.readFileSync(filePath, 'utf8');
+      } catch (err) {
+        return;
+      }
+
       const relativePath = path.relative(this.cwd, filePath);
+      const stripped = stripComments(content);
 
       // Rule #1: Dynamic-Gate
-      if (relativePath.includes('app/api') && (relativePath.endsWith('route.ts') || relativePath.endsWith('route.js'))) {
-        const usesDynamicData = /\b(cookies|headers)\(\)/.test(content);
+      // Matches any route.ts / route.tsx / route.js inside an app/ directory,
+      // not just app/api — Next.js route handlers can live anywhere under app/.
+      const isAppRouteHandler =
+        /(?:^|\/)app\//.test(relativePath) &&
+        /route\.(ts|tsx|js)$/.test(relativePath);
+
+      if (isAppRouteHandler) {
+        const usesDynamicData = /\b(cookies|headers)\(\)/.test(stripped);
         const hasForceDynamic = /export\s+const\s+dynamic\s*=\s*['"]force-dynamic['"]/.test(content);
         if (usesDynamicData && !hasForceDynamic) {
-          this.log(LOG_LEVELS.CRITICAL, RULES.DYNAMIC_GATE, 'API Route uses cookies/headers but lacks "force-dynamic". This will break on Vercel build.', filePath);
+          this.log(
+            LOG_LEVELS.CRITICAL, RULES.DYNAMIC_GATE,
+            'API Route uses cookies/headers but lacks "force-dynamic". This will break on Vercel build.',
+            filePath
+          );
         }
       }
 
       // Rule #2: Hardcoded API Keys
-      // Patterns with capture groups check the captured value against env var refs / placeholders.
-      // All other patterns check the full match text.
-      const CAPTURE_GROUP_PATTERNS = new Set([
-        'Password Assignment', 'API Key Assignment', 'Secret Assignment', 'Generic_Secret'
-      ]);
-
       for (const [provider, regex] of Object.entries(SECURITY_PATTERNS)) {
         regex.lastIndex = 0;
         let match;
         while ((match = regex.exec(content)) !== null) {
           const fullMatch = match[0];
-          const capturedVal = match[1] || match[2]; // support both capture positions
+          const capturedVal = match[1] || match[2];
 
           if (CAPTURE_GROUP_PATTERNS.has(provider)) {
             if (!capturedVal) continue;
@@ -175,9 +203,11 @@ class SniffSec {
             if (isPlaceholder(capturedVal)) continue;
           } else {
             if (isEnvVarRef(fullMatch)) continue;
+            if (isPlaceholder(fullMatch)) continue;
           }
 
-          this.log(LOG_LEVELS.CRITICAL, RULES.HARDCODED_KEYS, `Hardcoded ${provider} found!`, filePath);
+          const line = lineAt(content, match.index);
+          this.log(LOG_LEVELS.CRITICAL, RULES.HARDCODED_KEYS, `Hardcoded ${provider} found!`, filePath, line);
         }
       }
     });
@@ -185,11 +215,11 @@ class SniffSec {
     this.summary();
   }
 
-
   summary() {
     console.log(`\n${BLUE}${BOLD}>>> Sniff Summary:${RESET}`);
-    console.log(`${RED}Critical Risks: ${this.stats.critical}${RESET}`);
-    
+    const countColor = this.stats.critical > 0 ? RED : BLUE;
+    console.log(`${countColor}Critical Risks: ${this.stats.critical}${RESET}`);
+
     if (this.stats.critical > 0) {
       console.log(`\n${RED}${BOLD}STATUS: FAIL. Fix critical risks before shipping.${RESET}`);
       process.exit(1);
