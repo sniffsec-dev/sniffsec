@@ -5,6 +5,8 @@ const path = require('path');
 
 // ANSI Colors
 const RED = '\x1b[31m';
+const GREEN = '\x1b[32m';
+const YELLOW = '\x1b[33m';
 const BLUE = '\x1b[34m';
 const BOLD = '\x1b[1m';
 const RESET = '\x1b[0m';
@@ -46,6 +48,24 @@ function stripComments(content) {
 // Return the 1-based line number for a given character offset in content
 function lineAt(content, index) {
   return content.slice(0, index).split('\n').length;
+}
+
+// Generate a clean env var name from the provider label
+function toEnvVarName(provider) {
+  const OVERRIDES = {
+    'Password Assignment': 'PASSWORD',
+    'API Key Assignment': 'API_KEY',
+    'Secret Assignment': 'APP_SECRET',
+    'Generic_Secret': 'SECRET',
+    'MongoDB URI': 'MONGODB_URI',
+    'PostgreSQL URI': 'DATABASE_URL',
+    'MySQL URI': 'DATABASE_URL',
+    'Redis URI': 'REDIS_URL',
+    'JDBC URI': 'DATABASE_URL',
+    'Elasticsearch URI': 'ELASTICSEARCH_URL',
+  };
+  if (OVERRIDES[provider]) return OVERRIDES[provider];
+  return provider.toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '');
 }
 
 const SECURITY_PATTERNS = {
@@ -93,7 +113,7 @@ const SECURITY_PATTERNS = {
   "PGP Private Key Block": /-----BEGIN PGP PRIVATE KEY BLOCK-----/g,
 
   // --- Variable-assignment patterns (checked with env var / placeholder guard) ---
-  "Password Assignment":   /(password|passwd|pwd)\s*[:=]\s*['"]([^'"]{4,})['"]/gi,
+  "Password Assignment":   /(password|passwd|pwd)\s*[:=]\s*['"]([^'"]{8,})['"]/gi,
   "API Key Assignment":    /(api_key|apikey|api-key)\s*[:=]\s*['"]([a-zA-Z0-9\-._]{16,})['"]/gi,
   "Secret Assignment":     /(secret|client_secret)\s*[:=]\s*['"]([a-zA-Z0-9\-._]{16,})['"]/gi,
   "Generic_Secret":        /(?:password|secret|token|apiKey|api_key)\s*[:=]\s*['"]([^'"]{8,})['"]/gi,
@@ -104,14 +124,80 @@ const CAPTURE_GROUP_PATTERNS = new Set([
   'Password Assignment', 'API Key Assignment', 'Secret Assignment', 'Generic_Secret'
 ]);
 
+// URI patterns — placeholder check runs only on the credential portion (user:pass),
+// not the hostname, to avoid false negatives from cloud hostnames like
+// ep-cool-name-12345678.us-east-2.aws.neon.tech
+const URI_PATTERNS = new Set([
+  'MongoDB URI', 'PostgreSQL URI', 'MySQL URI', 'Redis URI', 'JDBC URI', 'Elasticsearch URI'
+]);
+
+// Patterns that cannot be auto-fixed (private keys need a file, URIs are complex)
+const NO_FIX_PATTERNS = new Set([
+  'Private Key Block', 'PGP Private Key Block', ...URI_PATTERNS
+]);
+
 /**
- * SniffSec CLI v0.1
+ * Compute the exact content positions to replace and what to replace with.
+ * Returns { start, end, replacement, envVarName } or null if the pattern can't be auto-fixed.
+ *
+ * Positions are absolute offsets into `content` (the file string).
+ * Fixes are applied bottom-to-top (highest start first) to preserve earlier offsets.
+ */
+function computeFix(content, match, provider) {
+  if (NO_FIX_PATTERNS.has(provider)) return null;
+
+  const envVarName = toEnvVarName(provider);
+  const envRef = `process.env.${envVarName}`;
+
+  if (CAPTURE_GROUP_PATTERNS.has(provider)) {
+    // The secret value is the last capture group.
+    // match[2] holds the value for two-group patterns; match[1] for single-group (Generic_Secret).
+    const capturedVal = match[2] !== undefined ? match[2] : match[1];
+    if (!capturedVal) return null;
+
+    // Find the position of the quoted value within the full match string
+    const valIdxInMatch = match[0].lastIndexOf(capturedVal);
+    if (valIdxInMatch === -1) return null;
+
+    // Include the surrounding quotes in the replacement range
+    const quoteStart = match.index + valIdxInMatch - 1;
+    const quoteEnd   = match.index + valIdxInMatch + capturedVal.length + 1;
+    return { start: quoteStart, end: quoteEnd, replacement: envRef, envVarName };
+  }
+
+  // Strong-prefix patterns: the regex match IS the secret value.
+  // Check if it is surrounded by quotes in the source so we can include them in the replacement.
+  const before = content[match.index - 1];
+  const after  = content[match.index + match[0].length];
+
+  if ((before === '"' || before === "'") && after === before) {
+    return {
+      start: match.index - 1,
+      end: match.index + match[0].length + 1,
+      replacement: envRef,
+      envVarName,
+    };
+  }
+
+  // No surrounding quotes found — replace the match itself
+  return {
+    start: match.index,
+    end: match.index + match[0].length,
+    replacement: envRef,
+    envVarName,
+  };
+}
+
+/**
+ * SniffSec CLI
  * Static Analysis Tool for Vibe Coders
  */
 class SniffSec {
   constructor() {
     this.cwd = process.cwd();
     this.stats = { critical: 0 };
+    this.fixMode = process.argv.includes('--fix');
+    this.findings = []; // populated only in --fix mode
   }
 
   log(level, rule, message, file, lineNumber) {
@@ -153,11 +239,19 @@ class SniffSec {
   }
 
   sniff() {
-    console.log(`${BLUE}${BOLD}>>> Sniffing for critical risks...${RESET}\n`);
+    if (this.fixMode) {
+      console.log(`${YELLOW}${BOLD}>>> Sniffing for critical risks (--fix mode)...${RESET}\n`);
+    } else {
+      console.log(`${BLUE}${BOLD}>>> Sniffing for critical risks...${RESET}\n`);
+    }
 
     this.walk(this.cwd, (filePath) => {
       const ext = path.extname(filePath);
-      if (!['.js', '.ts', '.jsx', '.tsx'].includes(ext)) return;
+      const fileName = path.basename(filePath);
+      const SUPPORTED_EXTS = ['.js', '.ts', '.jsx', '.tsx', '.env', '.yaml', '.yml', '.json', '.sh', '.py', '.go', '.rb'];
+      const SKIP_FILES = ['package-lock.json', 'yarn.lock', 'pnpm-lock.yaml', '.env.example'];
+      if (SKIP_FILES.includes(fileName)) return;
+      if (!SUPPORTED_EXTS.includes(ext) && !fileName.startsWith('.env')) return;
       if (filePath === __filename) return;
 
       let content;
@@ -179,7 +273,7 @@ class SniffSec {
 
       if (isAppRouteHandler) {
         const usesDynamicData = /\b(cookies|headers)\(\)/.test(stripped);
-        const hasForceDynamic = /export\s+const\s+dynamic\s*=\s*['"]force-dynamic['"]/.test(content);
+        const hasForceDynamic = /export\s+const\s+dynamic\s*=\s*['"]force-dynamic['"]/.test(stripped);
         if (usesDynamicData && !hasForceDynamic) {
           this.log(
             LOG_LEVELS.CRITICAL, RULES.DYNAMIC_GATE,
@@ -201,18 +295,101 @@ class SniffSec {
             if (!capturedVal) continue;
             if (isEnvVarRef(fullMatch)) continue;
             if (isPlaceholder(capturedVal)) continue;
+          } else if (URI_PATTERNS.has(provider)) {
+            if (isEnvVarRef(fullMatch)) continue;
+            // Extract only the credential (user:pass) between :// and @ — ignore the hostname
+            const credPart = (fullMatch.match(/:\/\/([^@]+)@/) || [])[1] || fullMatch;
+            if (isPlaceholder(credPart)) continue;
           } else {
             if (isEnvVarRef(fullMatch)) continue;
             if (isPlaceholder(fullMatch)) continue;
           }
 
-          const line = lineAt(content, match.index);
-          this.log(LOG_LEVELS.CRITICAL, RULES.HARDCODED_KEYS, `Hardcoded ${provider} found!`, filePath, line);
+          const lineNumber = lineAt(content, match.index);
+
+          if (this.fixMode) {
+            const fix = computeFix(content, match, provider);
+            this.findings.push({ filePath, provider, lineNumber, fix });
+            this.stats.critical++;
+          } else {
+            this.log(LOG_LEVELS.CRITICAL, RULES.HARDCODED_KEYS, `Hardcoded ${provider} found!`, filePath, lineNumber);
+          }
         }
       }
     });
 
+    if (this.fixMode && this.findings.length > 0) {
+      this.applyFixes();
+    }
+
     this.summary();
+  }
+
+  applyFixes() {
+    // Group findings by file
+    const byFile = new Map();
+    for (const finding of this.findings) {
+      if (!byFile.has(finding.filePath)) byFile.set(finding.filePath, []);
+      byFile.get(finding.filePath).push(finding);
+    }
+
+    const envVarsToAdd = new Set();
+
+    for (const [filePath, findings] of byFile) {
+      let content = fs.readFileSync(filePath, 'utf8');
+
+      const fixable   = findings.filter(f => f.fix !== null).sort((a, b) => b.fix.start - a.fix.start);
+      const unfixable = findings.filter(f => f.fix === null);
+
+      // Apply fixes from bottom to top so earlier offsets stay valid.
+      // Track applied ranges to skip fixes that overlap with an already-applied one
+      // (multiple patterns can match the same text — only the first fix wins).
+      const appliedRanges = [];
+
+      for (const finding of fixable) {
+        const { start, end, replacement, envVarName } = finding.fix;
+        const overlaps = appliedRanges.some(([s, e]) => start < e && end > s);
+        if (overlaps) continue;
+
+        content = content.slice(0, start) + replacement + content.slice(end);
+        appliedRanges.push([start, end]);
+        envVarsToAdd.add(envVarName);
+        console.log(`${GREEN}${BOLD}[FIXED]${RESET} ${BOLD}${finding.provider}${RESET}: replaced with process.env.${envVarName} ${BLUE}(${path.relative(this.cwd, filePath)}:${finding.lineNumber})${RESET}`);
+      }
+
+      for (const finding of unfixable) {
+        console.log(`${YELLOW}${BOLD}[MANUAL REQUIRED]${RESET} ${BOLD}${finding.provider}${RESET}: move this value to your .env file manually. ${BLUE}(${path.relative(this.cwd, filePath)}:${finding.lineNumber})${RESET}`);
+      }
+
+      if (fixable.length > 0) {
+        fs.writeFileSync(filePath, content, 'utf8');
+      }
+    }
+
+    if (envVarsToAdd.size > 0) {
+      this.updateEnvExample(envVarsToAdd);
+    }
+  }
+
+  updateEnvExample(envVars) {
+    const envExamplePath = path.join(this.cwd, '.env.example');
+    const existed = fs.existsSync(envExamplePath);
+    const existing = existed ? fs.readFileSync(envExamplePath, 'utf8') : '';
+
+    const toAdd = [...envVars].filter(v => !existing.includes(`${v}=`));
+    if (toAdd.length === 0) return;
+
+    const newContent = existing
+      ? existing.trimEnd() + '\n' + toAdd.map(v => `${v}=`).join('\n') + '\n'
+      : toAdd.map(v => `${v}=`).join('\n') + '\n';
+
+    fs.writeFileSync(envExamplePath, newContent, 'utf8');
+
+    console.log(`\n${GREEN}${BOLD}>>> .env.example ${existed ? 'updated' : 'created'}:${RESET}`);
+    for (const v of toAdd) {
+      console.log(`  ${GREEN}${BOLD}${v}=${RESET}`);
+    }
+    console.log(`\n${YELLOW}${BOLD}>>> Next step:${RESET} Copy these variable names into your ${BOLD}.env${RESET} file and fill in the actual values.`);
   }
 
   summary() {
@@ -221,8 +398,14 @@ class SniffSec {
     console.log(`${countColor}Critical Risks: ${this.stats.critical}${RESET}`);
 
     if (this.stats.critical > 0) {
-      console.log(`\n${RED}${BOLD}STATUS: FAIL. Fix critical risks before shipping.${RESET}`);
-      process.exit(1);
+      if (this.fixMode) {
+        console.log(`\n${GREEN}${BOLD}STATUS: FIXED. Review the changes, then add your secrets to .env.${RESET}`);
+        process.exit(0);
+      } else {
+        console.log(`\n${RED}${BOLD}STATUS: FAIL. Fix critical risks before shipping.${RESET}`);
+      console.log(`${YELLOW}TIP: Run ${BOLD}sniffsec --fix${RESET}${YELLOW} to auto-replace hardcoded secrets with env var references.${RESET}`);
+        process.exit(1);
+      }
     } else {
       console.log(`\n${BLUE}${BOLD}STATUS: PASS. No issues detected.${RESET}`);
       process.exit(0);

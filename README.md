@@ -1,6 +1,6 @@
 # SniffSec 👃🛡️
 
-> **"You code/vibe. We sniff and secure."**
+> **"You code. We sniff and secure."**
 
 [![npm version](https://img.shields.io/npm/v/sniffsec.svg?style=flat-square&color=0078d4)](https://www.npmjs.com/package/sniffsec)
 [![license](https://img.shields.io/badge/license-MIT-green.svg?style=flat-square)](https://github.com/sniffsec-dev/sniffsec/blob/main/LICENSE)
@@ -12,11 +12,19 @@ AI agents (Cursor, Claude, GPT) are elite at coding, but they don't care about y
 
 ## 🛠️ Instant Audit
 
-No config. No fluff. Just security.
+No config. Just secure development.
 
 ```bash
 npx sniffsec
 ```
+
+Found issues? Auto-replace hardcoded secrets with env var references:
+
+```bash
+npx sniffsec --fix
+```
+
+Creates a `.env.example` with the variable names. You fill in the values.
 
 ---
 
@@ -33,6 +41,8 @@ Update your `GEMINI.md` file:
 
 Whenever asked to analyze for security risks or secrets, you **MUST** run:
 `npx sniffsec`
+
+If issues are found, run `npx sniffsec --fix` to auto-replace hardcoded secrets with env var references.
 ```
 
 ### For Cursor (`.cursorrules` or `.cursor/rules/sniffsec.mdc`)
@@ -44,16 +54,18 @@ Update the `.cursorrules` file or a rule in `.cursor/rules/` to ensure Cursor al
 
 Whenever you generate code with API keys or PII, you MUST suggest running:
 `npx sniffsec`
+
+If issues are found, run `npx sniffsec --fix` to auto-replace hardcoded secrets with env var references.
 ```
 
 ### For Claude (`claude.md`)
 
-If you use Claude-based agents, updated the `claude.md` file:
+If you use Claude-based agents, update the `claude.md` file:
 
 ```markdown
 # SniffSec Workflow
 
-Use `npx sniffsec` as the primary verification tool. Before completing any task, run the scan. If `issuesFound > 0`, the task is not complete.
+Use `npx sniffsec` as the primary verification tool. Before completing any task, run the scan. If `issuesFound > 0`, run `npx sniffsec --fix` to auto-replace hardcoded secrets, then re-run the scan to confirm it passes.
 ```
 
 ---
@@ -67,6 +79,10 @@ Use `npx sniffsec` as the primary verification tool. Before completing any task,
 - **Infrastructure:** Kubernetes, Docker Hub, Hashicorp Vault, Terraform, CircleCI.
 - **Environment Risks:** Private Keys (RSA/PEM/PGP), Internal IPs, Localhost leaks, Dev/Stage URLs.
 - **Next.js Risks:** API Route misconfigurations (missing "force-dynamic").
+
+### 📁 Files scanned:
+
+`.js` `.ts` `.jsx` `.tsx` `.env` `.yaml` `.yml` `.json` `.sh` `.py` `.go` `.rb`
 
 ---
 
